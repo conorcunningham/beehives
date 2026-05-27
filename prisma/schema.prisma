@@ -1,0 +1,83 @@
+// Prisma schema = your Django models.py + migrations rolled into one.
+// Docs for THIS version live in node_modules/prisma — trust those over the web.
+
+generator client {
+  // Prisma 7's modern generator. Emits an ESM client into /generated/prisma.
+  // You import from "@/generated/prisma" rather than "@prisma/client".
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  // Prisma 7: the connection `url` no longer lives here. It's set in
+  // prisma.config.ts (for the CLI/Migrate) and passed to PrismaClient via an
+  // adapter at runtime. This block now only declares the provider.
+  provider = "postgresql"
+}
+
+// A Postgres enum — the queen-marking colour convention. Like Django TextChoices,
+// but enforced by the database itself, not just the app.
+enum QueenColour {
+  BLUE
+  WHITE
+  YELLOW
+  RED
+  GREEN
+}
+
+model User {
+  // Surrogate PK (cuid) instead of email-as-PK: emails change, FKs shouldn't break.
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String // never store the raw password
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Many-to-many to Beehive. The relation name ties both sides together.
+  // Prisma creates the implicit join table for us (like Django's ManyToManyField).
+  beehives Beehive[] @relation("BeehiveKeepers")
+}
+
+model Beehive {
+  id   String @id @default(cuid())
+  name String @unique
+
+  // NOTE: the 1..5 range is NOT enforceable in the Prisma schema. It lives in the
+  // Zod layer (our "serializer"). Prisma = persistence, Zod = validation boundary.
+  strength     Int
+  skattekasser Int // honey supers
+
+  queenColour QueenColour
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  beekeepers User[]        @relation("BeehiveKeepers")
+  notes      BeehiveNote[]
+}
+
+model BeekeepingSession {
+  id   String   @id @default(cuid())
+  // @db.Date = a date with no time component. Unique => one session per calendar day.
+  date DateTime @unique @db.Date
+
+  createdAt DateTime      @default(now())
+  notes     BeehiveNote[]
+}
+
+model BeehiveNote {
+  id String @id @default(cuid())
+
+  // Foreign keys. onDelete: Cascade => deleting a hive/session removes its notes.
+  hiveId    String
+  hive      Beehive           @relation(fields: [hiveId], references: [id], onDelete: Cascade)
+  sessionId String
+  session   BeekeepingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  // The note's date comes from its session (we dropped the redundant date field).
+  note      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // "One note per hive per session" — a composite unique constraint.
+  @@unique([hiveId, sessionId])
+}
